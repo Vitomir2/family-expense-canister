@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 type Family = Record<{
     id: string;
+    admin: Principal;
     name: string; // * The family name
     members: Vec<string>; // * Names of the family members, e.g., George
     address: string; // * The address of the property where they live
@@ -65,7 +66,7 @@ export function getFamilyExpenses(familyId: string): Result<Vec<FamilyExpense>, 
 
 $update;
 export function addFamily(payload: FamilyPayload): Result<Family, string> {
-    const family: Family = { id: uuidv4(), createdBy: ic.caller(), createdAt: ic.time(), updatedAt: Opt.None, ...payload };
+    const family: Family = { id: uuidv4(), admin: ic.caller(), createdBy: ic.caller(), createdAt: ic.time(), updatedAt: Opt.None, ...payload };
     familyStorage.insert(family.id, family);
     return Result.Ok(family);
 }
@@ -74,6 +75,9 @@ $update;
 export function updateFamily(id: string, payload: FamilyPayload): Result<Family, string> {
     return match(familyStorage.get(id), {
         Some: (family) => {
+            if (family.admin.toString() !== ic.caller().toString()) {
+                return Result.Err<Family,string>(`Caller isn't the admin of the family with id ${id}.`);
+            }
             const updatedFamily: Family = {...family, ...payload, updatedAt: Opt.Some(ic.time())};
             familyStorage.insert(family.id, updatedFamily);
             return Result.Ok<Family, string>(updatedFamily);
@@ -85,8 +89,11 @@ export function updateFamily(id: string, payload: FamilyPayload): Result<Family,
 $update;
 export function addFamilyExpense(payload: FamilyExpensePayload): Result<FamilyExpense, string> {
     const family = familyStorage.get(payload.familyId)
-    if (!family) {
+    if (!family.Some) {
         return Result.Err(`Family with id=${payload.familyId} not found.`);
+    }
+    if (family.Some.admin.toString() !== ic.caller().toString()) {
+        return Result.Err(`Caller isn't the admin of the family with id ${payload.familyId}.`);
     }
 
     const familyExpense: FamilyExpense = { id: uuidv4(), createdAt: ic.time(), ...payload };
@@ -96,17 +103,34 @@ export function addFamilyExpense(payload: FamilyExpensePayload): Result<FamilyEx
 
 $update;
 export function deleteFamily(id: string): Result<Family, string> {
-    return match(familyStorage.remove(id), {
-        Some: (deletedFamily) => Result.Ok<Family, string>(deletedFamily),
+    return match(familyStorage.get(id), {
+        Some: (family) => {
+            if (family.admin.toString() !== ic.caller().toString()) {
+                return Result.Err<Family,string>(`Caller isn't the admin of the family with id ${id}.`);
+            }
+            familyStorage.remove(id)
+            return Result.Ok<Family, string>(family)
+        },
         None: () => Result.Err<Family, string>(`Couldn't delete a family with id=${id}. Family not found.`)
     });
 }
 
 $update;
 export function deleteFamilyExpense(id: string): Result<FamilyExpense, string> {
-    return match(familyExpensesStorage.remove(id), {
-        Some: (deletedFamilyExpense) => Result.Ok<FamilyExpense, string>(deletedFamilyExpense),
-        None: () => Result.Err<FamilyExpense, string>(`Couldn't delete a family expense with id=${id}. It has not found.`)
+    return match(familyExpensesStorage.get(id), {
+        Some: (familyExpense) => {
+            const family = familyStorage.get(familyExpense.familyId)
+            if (!family.Some) {
+                familyExpensesStorage.remove(id);
+                return Result.Err<FamilyExpense, string>(`Deleted family expense with id=${familyExpense.id} as no family with id=${familyExpense.familyId} exists.`)
+            }
+            if (family.Some.admin.toString() !== ic.caller().toString()) {
+                return Result.Err<FamilyExpense,string>(`Caller isn't the admin of the family with id ${familyExpense.familyId}.`);
+            }
+            familyExpensesStorage.remove(id)
+            return Result.Ok<FamilyExpense, string>(familyExpense)
+        },
+        None: () => Result.Err<FamilyExpense, string>(`Couldn't delete a family expense with id=${id}. It has not been found.`)
     });
 }
 
