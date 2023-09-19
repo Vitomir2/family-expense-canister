@@ -3,11 +3,11 @@ import { v4 as uuidv4 } from 'uuid';
 
 type Family = Record<{
     id: string;
-    admin: Principal;
+    admin: Principal; // * Admin which is the creator of the family
     name: string; // * The family name
     members: Vec<string>; // * Names of the family members, e.g., George
     address: string; // * The address of the property where they live
-    createdBy: Principal; // * Add the creator's principal
+    totalIncome: string; // * Total accumulated income of the family
     createdAt: nat64;
     updatedAt: Opt<nat64>;
 }>
@@ -16,6 +16,7 @@ type FamilyPayload = Record <{
     name: string;
     members: Vec<string>;
     address: string;
+    income: string;
 }>
 
 type FamilyExpense = Record<{
@@ -35,12 +36,13 @@ type FamilyExpensePayload = Record<{
 const familyStorage = new StableBTreeMap<string, Family>(0, 44, 1024);
 const familyExpensesStorage = new StableBTreeMap<string, FamilyExpense>(1, 44, 1024);
 
-// dfx canister call family_expense addFamily '(record {"name"= "Smith"; "members"= vec { "John"; "Jane"; "Chris"; "Kerry" }; "address"= "153 Linkoln St., DC, Washington"})'
-// dfx canister call family_expense addFamily '(record {"name"= "Wilson"; "members"= vec { "Alexander"; "Angelina"; "Mike"; "Katty" }; "address"= "810 Pleasant St., Illinois, Chicago"})'
+// dfx canister call family_expense addFamily '(record {"name"= "Smith"; "members"= vec { "John"; "Jane"; "Chris"; "Kerry" }; "address"= "153 Linkoln St., DC, Washington"; "income"="1500"})'
+// dfx canister call family_expense addFamily '(record {"name"= "Wilson"; "members"= vec { "Alexander"; "Angelina"; "Mike"; "Katty" }; "address"= "810 Pleasant St., Illinois, Chicago"; "income"="2100"})'
 // dfx canister call family_expense getFamily '("abf10d57-3be8-4c0a-9c6d-f93e98cd9f08")'
 // dfx canister call family_expense getFamilies '()'
-// dfx canister call family_expense addFamilyExpense '(record {"familyId"= "f88a5706-ec6b-45e4-9fa3-3ab7c8dc2e65"; "amount"= "105.60"; "attachmentURL"= "url/path/to/some/photo/attachment"})'
-// dfx canister call family_expense addFamilyExpense '(record {"familyId"= "abf10d57-3be8-4c0a-9c6d-f93e98cd9f08"; "amount"= "255.15"; "attachmentURL"= "url/path/to/some/photo/attachment"})'
+// dfx canister call family_expense getNetFamilyIncome '("4dad5155-3a1c-4305-9d55-3bf379d2c30a")'
+// dfx canister call family_expense addFamilyExpense '(record {"familyId"= "4dad5155-3a1c-4305-9d55-3bf379d2c30a"; "amount"= "105.60"; "attachmentURL"= "url/path/to/some/photo/attachment"})'
+// dfx canister call family_expense addFamilyExpense '(record {"familyId"= "4dad5155-3a1c-4305-9d55-3bf379d2c30a"; "amount"= "255.15"; "attachmentURL"= "url/path/to/some/photo/attachment"})'
 // dfx canister call family_expense addFamilyExpense '(record {"familyId"= "f8c246f8-6167-4800-a921-72b169ec3589"; "amount"= "55.25"; "attachmentURL"= "url/path/to/some/photo/attachment"})'
 // dfx canister call family_expense getFamilyExpenses '("4f70de76-380e-43e1-b6cd-d969ec17a9f8")'
 // dfx canister call family_expense deleteFamily '("0eb5588c-aa66-416d-8a0c-0daca3ba3c3d")'
@@ -64,9 +66,33 @@ export function getFamilyExpenses(familyId: string): Result<Vec<FamilyExpense>, 
     return Result.Ok(familyExpensesStorage.values().filter(familyExpense => familyExpense.familyId === familyId));
 }
 
+$query;
+export function getNetFamilyIncome(familyId: string): Result<string, string> {
+    const family = match(familyStorage.get(familyId), {
+        Some: (family) => {
+            return Result.Ok(family);
+        },
+        None: () => Result.Err<Family, string>(`Couldn't find family with id ${familyId}.`)
+    });
+
+    if (family.Err || !family.Ok) return Result.Err<string, string>('Family not found.');
+
+    // const family = familyStorage.get(familyId);
+    // if (!family) return Result.Err<Opt<Family>, string>('Family not found.');
+
+    const familyExpenses = familyExpensesStorage.values().filter(familyExpense => familyExpense.familyId === familyId);
+    let netIncome = Number(family.Ok.totalIncome)
+    familyExpenses.forEach(familyExpense => {
+        netIncome -= Number(familyExpense.amount)
+    });
+
+    // return Result.Ok(familyExpensesStorage.values().filter(familyExpense => familyExpense.familyId === familyId));
+    return Result.Ok<string, string>(netIncome.toString());
+}
+
 $update;
 export function addFamily(payload: FamilyPayload): Result<Family, string> {
-    const family: Family = { id: uuidv4(), admin: ic.caller(), createdBy: ic.caller(), createdAt: ic.time(), updatedAt: Opt.None, ...payload };
+    const family: Family = { id: uuidv4(), admin: ic.caller(), createdAt: ic.time(), updatedAt: Opt.None, totalIncome: payload.income, ...payload };
     familyStorage.insert(family.id, family);
     return Result.Ok(family);
 }
@@ -78,7 +104,13 @@ export function updateFamily(id: string, payload: FamilyPayload): Result<Family,
             if (family.admin.toString() !== ic.caller().toString()) {
                 return Result.Err<Family,string>(`Caller isn't the admin of the family with id ${id}.`);
             }
+
             const updatedFamily: Family = {...family, ...payload, updatedAt: Opt.Some(ic.time())};
+
+            // * update the total income by increasing it with the current input
+            const newTotalIncome = Number(family.totalIncome) + Number(payload.income)
+            updatedFamily.totalIncome = newTotalIncome.toString()
+
             familyStorage.insert(family.id, updatedFamily);
             return Result.Ok<Family, string>(updatedFamily);
         },

@@ -1,3 +1,4 @@
 .dfx
 .azle
 *.did
+node_modules
