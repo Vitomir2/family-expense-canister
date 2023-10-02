@@ -31,15 +31,15 @@ npm install
 - then run the following commands to start the icp blockchain locally and deploy the canister
 
 ```
-    dfx start --background --clean
-    dfx deploy
+dfx start --background --clean
+dfx deploy
 ```
 
 - then you can make calls to the canister and its methods (getFamilies, getFamily, getFamilyExpenses, addFamily, updateFamily, addFamilyExpense, deleteFamily). Here are some example CLI commands:
 
 1. add a family:
 ```
-dfx canister call family_expense addFamily '(record {"name"= "Smith"; "members"= vec { "John"; "Jane"; "Chris"; "Kerry" }; "address"= "153 Linkoln St., DC, Washington"})'
+dfx canister call family_expense addFamily '(record {"name"= "Smith"; "members"= vec { "John"; "Jane"; "Chris"; "Kerry" }; "address"= "153 Linkoln St., DC, Washington"; "income"=1500.00})'
 ```
 
 2. get a specific family
@@ -52,22 +52,37 @@ dfx canister call family_expense getFamily '("<family.id>")'
 dfx canister call family_expense getFamilies '()'
 ```
 
-4. add new expense
+4. get family net income
 ```
-dfx canister call family_expense addFamilyExpense '(record {"familyId"= "<family.id>"; "amount"= "105.60"; "attachmentURL"= "url/path/to/some/photo/attachment"})'
+dfx canister call family_expense getNetFamilyIncome '("<family.id>")'
 ```
 
-5. get a family expenses
+5. update family
+```
+dfx canister call family_expense updateFamily '("<family.id>", record {"name"= "New name"; "members"= vec { "Name1"; "Name2"; }; "address"= "addr1"; "income"=2100.00})'
+```
+
+6. update family income
+```
+dfx canister call family_expense updateFamilyIncome '("<family.id>", 1250.00)'
+```
+
+7. add new expense
+```
+dfx canister call family_expense addFamilyExpense '(record {"familyId"= "<family.id>"; "amount"= 105.60; "attachmentURL"= "url/path/to/some/photo/attachment"})'
+```
+
+8. get a family expenses
 ```
 dfx canister call family_expense getFamilyExpenses '("<family.id>")'
 ```
 
-6. delete a family
+9. delete a family
 ```
 dfx canister call family_expense deleteFamily '("<family.id>")'
 ```
 
-7. delete a family expense
+10. delete a family expense
 ```
 dfx canister call family_expense deleteFamilyExpense '("<family.id>")'
 ```

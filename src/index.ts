@@ -1,4 +1,4 @@
-import { $query, $update, Record, StableBTreeMap, Vec, match, Result, nat64, ic, Opt, Principal } from 'azle';
+import { $query, $update, Record, StableBTreeMap, Vec, match, Result, nat64, ic, Opt, Principal, float64 } from 'azle';
 import { v4 as uuidv4 } from 'uuid';
 
 type Family = Record<{
@@ -7,7 +7,7 @@ type Family = Record<{
     name: string; // * The family name
     members: Vec<string>; // * Names of the family members, e.g., George
     address: string; // * The address of the property where they live
-    totalIncome: string; // * Total accumulated income of the family
+    totalIncome: float64; // * Total accumulated income of the family
     createdAt: nat64;
     updatedAt: Opt<nat64>;
 }>
@@ -16,37 +16,25 @@ type FamilyPayload = Record <{
     name: string;
     members: Vec<string>;
     address: string;
-    income: string;
+    income: float64;
 }>
 
 type FamilyExpense = Record<{
     id: string;
     familyId: string;
-    amount: string;
+    amount: float64;
     attachmentURL: string; // * Picture of a receipt
     createdAt: nat64;
 }>
 
 type FamilyExpensePayload = Record<{
     familyId: string;
-    amount: string;
+    amount: float64;
     attachmentURL: string;
 }>
 
 const familyStorage = new StableBTreeMap<string, Family>(0, 44, 1024);
 const familyExpensesStorage = new StableBTreeMap<string, FamilyExpense>(1, 44, 1024);
-
-// dfx canister call family_expense addFamily '(record {"name"= "Smith"; "members"= vec { "John"; "Jane"; "Chris"; "Kerry" }; "address"= "153 Linkoln St., DC, Washington"; "income"="1500"})'
-// dfx canister call family_expense addFamily '(record {"name"= "Wilson"; "members"= vec { "Alexander"; "Angelina"; "Mike"; "Katty" }; "address"= "810 Pleasant St., Illinois, Chicago"; "income"="2100"})'
-// dfx canister call family_expense getFamily '("abf10d57-3be8-4c0a-9c6d-f93e98cd9f08")'
-// dfx canister call family_expense getFamilies '()'
-// dfx canister call family_expense getNetFamilyIncome '("4dad5155-3a1c-4305-9d55-3bf379d2c30a")'
-// dfx canister call family_expense addFamilyExpense '(record {"familyId"= "4dad5155-3a1c-4305-9d55-3bf379d2c30a"; "amount"= "105.60"; "attachmentURL"= "url/path/to/some/photo/attachment"})'
-// dfx canister call family_expense addFamilyExpense '(record {"familyId"= "4dad5155-3a1c-4305-9d55-3bf379d2c30a"; "amount"= "255.15"; "attachmentURL"= "url/path/to/some/photo/attachment"})'
-// dfx canister call family_expense addFamilyExpense '(record {"familyId"= "f8c246f8-6167-4800-a921-72b169ec3589"; "amount"= "55.25"; "attachmentURL"= "url/path/to/some/photo/attachment"})'
-// dfx canister call family_expense getFamilyExpenses '("4f70de76-380e-43e1-b6cd-d969ec17a9f8")'
-// dfx canister call family_expense deleteFamily '("0eb5588c-aa66-416d-8a0c-0daca3ba3c3d")'
-// dfx canister call family_expense deleteFamilyExpense '("abf10d57-3be8-4c0a-9c6d-f93e98cd9f08")'
 
 $query;
 export function getFamilies(): Result<Vec<Family>, string> {
@@ -67,7 +55,7 @@ export function getFamilyExpenses(familyId: string): Result<Vec<FamilyExpense>, 
 }
 
 $query;
-export function getNetFamilyIncome(familyId: string): Result<string, string> {
+export function getNetFamilyIncome(familyId: string): Result<float64, string> {
     const family = match(familyStorage.get(familyId), {
         Some: (family) => {
             return Result.Ok(family);
@@ -75,19 +63,15 @@ export function getNetFamilyIncome(familyId: string): Result<string, string> {
         None: () => Result.Err<Family, string>(`Couldn't find family with id ${familyId}.`)
     });
 
-    if (family.Err || !family.Ok) return Result.Err<string, string>('Family not found.');
-
-    // const family = familyStorage.get(familyId);
-    // if (!family) return Result.Err<Opt<Family>, string>('Family not found.');
+    if (family.Err || !family.Ok) return Result.Err<float64, string>('Family not found.');
 
     const familyExpenses = familyExpensesStorage.values().filter(familyExpense => familyExpense.familyId === familyId);
-    let netIncome = Number(family.Ok.totalIncome)
+    let netIncome = family.Ok.totalIncome
     familyExpenses.forEach(familyExpense => {
-        netIncome -= Number(familyExpense.amount)
+        netIncome -= familyExpense.amount
     });
 
-    // return Result.Ok(familyExpensesStorage.values().filter(familyExpense => familyExpense.familyId === familyId));
-    return Result.Ok<string, string>(netIncome.toString());
+    return Result.Ok<float64, string>(netIncome);
 }
 
 $update;
@@ -105,11 +89,27 @@ export function updateFamily(id: string, payload: FamilyPayload): Result<Family,
                 return Result.Err<Family,string>(`Caller isn't the admin of the family with id ${id}.`);
             }
 
-            const updatedFamily: Family = {...family, ...payload, updatedAt: Opt.Some(ic.time())};
+            const updatedFamily: Family = {...family, ...payload, totalIncome: payload.income, updatedAt: Opt.Some(ic.time())};
+
+            familyStorage.insert(family.id, updatedFamily);
+            return Result.Ok<Family, string>(updatedFamily);
+        },
+        None: () => Result.Err<Family, string>(`Couldn't update a family with id=${id}. Family not found.`)
+    });
+}
+
+$update;
+export function updateFamilyIncome(id: string, income: float64): Result<Family, string> {
+    return match(familyStorage.get(id), {
+        Some: (family) => {
+            if (family.admin.toString() !== ic.caller().toString()) {
+                return Result.Err<Family,string>(`Caller isn't the admin of the family with id ${id}.`);
+            }
+
+            const updatedFamily: Family = {...family, updatedAt: Opt.Some(ic.time())};
 
             // * update the total income by increasing it with the current input
-            const newTotalIncome = Number(family.totalIncome) + Number(payload.income)
-            updatedFamily.totalIncome = newTotalIncome.toString()
+            updatedFamily.totalIncome += income
 
             familyStorage.insert(family.id, updatedFamily);
             return Result.Ok<Family, string>(updatedFamily);
